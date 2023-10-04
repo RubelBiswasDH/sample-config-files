@@ -1,0 +1,79 @@
+name: Publish Docker image
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  push_to_registry:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_BARIKOI_API_KEY: ${{ secrets.NEXT_PUBLIC_BARIKOI_API_KEY }}
+      NEXT_PUBLIC_BASE_URL: ${{ secrets.NEXT_PUBLIC_BASE_URL }}
+      branch: "$(basename ${GITHUB_REF})"
+
+    environment: 
+      name: ${{ github.ref_name }}
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      - name: Print branch name
+        run: |
+          echo "Branch name is: '${{ github.ref_name }}'"
+        
+      - name: Save Tag
+        run: |
+          echo "TAG=${{ github.ref_name }}-$(node -p "require('./package.json').version")" >> $GITHUB_ENV
+
+      - name: Current Tag
+        run: echo "Tag is ${{ env.TAG }}"
+      
+      - name: Log in to Docker Hub
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Extract metadata (tags, labels) for Docker Main Branch
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/cnl-dashboard
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          push: true
+          build-args: |
+            NEXT_PUBLIC_BARIKOI_API_KEY=${{ env.NEXT_PUBLIC_BARIKOI_API_KEY }}
+            NEXT_PUBLIC_BASE_URL=${{ env.NEXT_PUBLIC_BASE_URL }}
+          tags: ${{ secrets.DOCKER_USERNAME }}/cnl-dashboard:${{ env.TAG }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Run deployment command
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          # port: ${{ secrets.PORT }}
+          script: |
+            cd /mnt/cnl-dashboard-docker
+            docker-compose down
+            docker image prune -af
+            docker-compose pull
+            docker-compose up -d
+
+      - name: Slack Notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,eventName,ref,workflow,pullRequest # selectable (default: repo,message)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
