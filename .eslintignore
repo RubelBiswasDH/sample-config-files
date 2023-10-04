@@ -1,0 +1,11 @@
+.next/
+node_modules/
+coverage/
+__snapshots__/
+package-lock.json
+cypress/
+__test__
+jest.setup.js
+jest.config.mjs
+setupTests.js
+commitlint.config.js
